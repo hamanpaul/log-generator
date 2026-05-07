@@ -1,0 +1,8 @@
+policy_profile: flat
+policy_version: 1.0.0
+code_paths:
+  - "bin/**"
+  - "serialwrap_reboot_test/**/*.py"
+  - "tests/**/*.py"
+  - "**/*.sh"
+  - "scripts/**"
