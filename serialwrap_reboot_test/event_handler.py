@@ -27,6 +27,46 @@ EVENT_MATCH_TEXT = {
 }
 
 
+def _normalize_event_name(payload: Dict[str, Any]) -> Optional[str]:
+    """Return report event name from legacy or current serialwrap payload fields."""
+    event = payload.get("event")
+    if event is not None:
+        if not isinstance(event, str):
+            return None
+        return EVENT_MATCH_TEXT.get(event)
+
+    candidates = [
+        payload.get("matched_text"),
+        payload.get("rule_name"),
+    ]
+    rule_id = payload.get("rule_id")
+    if isinstance(rule_id, str) and "." in rule_id:
+        candidates.append(rule_id.rsplit(".", 1)[1])
+
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            normalized = EVENT_MATCH_TEXT.get(candidate)
+            if normalized is not None:
+                return normalized
+    return None
+
+
+def _event_timestamp(payload: Dict[str, Any]) -> str:
+    """Return ISO trigger timestamp from legacy or current serialwrap payload fields."""
+    timestamp = payload.get("timestamp")
+    if isinstance(timestamp, str) and timestamp:
+        return timestamp
+
+    matched_at = payload.get("matched_at", payload.get("trigger_ts"))
+    if isinstance(matched_at, (int, float)):
+        value = float(matched_at)
+        if value > 10_000_000_000:
+            value = value / 1000.0
+        return datetime.fromtimestamp(value, timezone.utc).astimezone().isoformat()
+
+    return datetime.now(timezone.utc).astimezone().isoformat()
+
+
 @contextlib.contextmanager
 def _locked_file(lock_path: Path):
     """Context manager for file locking.
@@ -106,18 +146,15 @@ def parse_event_payload(payload_str: str) -> Optional[Dict[str, Any]]:
         return None
     
     selector = payload.get("selector")
-    event = payload.get("event")
     if not isinstance(selector, str) or not SELECTOR_PATTERN.match(selector):
         return None
     
-    if not isinstance(event, str):
-        return None
-    
-    normalized_event = EVENT_MATCH_TEXT.get(event)
+    normalized_event = _normalize_event_name(payload)
     if normalized_event is None:
         return None
     
     payload["event"] = normalized_event
+    payload["timestamp"] = _event_timestamp(payload)
     return payload
 
 

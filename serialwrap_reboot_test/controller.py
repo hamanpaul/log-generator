@@ -235,36 +235,62 @@ class RebootController:
         Returns:
             List of rule dictionaries.
         """
+        owner = "agent-reboot-controller"
         rules = [
             {
+                "schema_version": 1,
+                "owner": owner,
                 "name": "brcm-therm",
-                "match": "brcm-therm",
+                "rule_id": f"{owner}.brcm-therm",
+                "kind": "tool",
                 "selectors": ["COM0", "COM1"],
-                "handler": "serialwrap-event-handler"
+                "pattern": {"kind": "contains", "value": "brcm-therm"},
+                "handler": {"exec": ["serialwrap-event-handler"]},
+                "auto_enable_com_on_load": False
             },
             {
+                "schema_version": 1,
+                "owner": owner,
                 "name": "link-down",
-                "match": "Link is Down",
+                "rule_id": f"{owner}.link-down",
+                "kind": "tool",
                 "selectors": ["COM0", "COM1"],
-                "handler": "serialwrap-event-handler"
+                "pattern": {"kind": "contains", "value": "Link is Down"},
+                "handler": {"exec": ["serialwrap-event-handler"]},
+                "auto_enable_com_on_load": False
             },
             {
+                "schema_version": 1,
+                "owner": owner,
                 "name": "pstate",
-                "match": "pstate",
+                "rule_id": f"{owner}.pstate",
+                "kind": "tool",
                 "selectors": ["COM0", "COM1"],
-                "handler": "serialwrap-event-handler"
+                "pattern": {"kind": "contains", "value": "pstate"},
+                "handler": {"exec": ["serialwrap-event-handler"]},
+                "auto_enable_com_on_load": False
             },
             {
+                "schema_version": 1,
+                "owner": owner,
                 "name": "kernel-panic",
-                "match": "Kernel panic",
+                "rule_id": f"{owner}.kernel-panic",
+                "kind": "tool",
                 "selectors": ["COM0", "COM1"],
-                "handler": "serialwrap-event-handler"
+                "pattern": {"kind": "contains", "value": "Kernel panic"},
+                "handler": {"exec": ["serialwrap-event-handler"]},
+                "auto_enable_com_on_load": False
             },
             {
+                "schema_version": 1,
+                "owner": owner,
                 "name": "smc-bootloader",
-                "match": "SMC bootloader",
+                "rule_id": f"{owner}.smc-bootloader",
+                "kind": "tool",
                 "selectors": ["COM0", "COM1"],
-                "handler": "serialwrap-event-handler"
+                "pattern": {"kind": "contains", "value": "SMC bootloader"},
+                "handler": {"exec": ["serialwrap-event-handler"]},
+                "auto_enable_com_on_load": False
             }
         ]
         return rules

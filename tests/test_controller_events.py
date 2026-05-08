@@ -62,7 +62,25 @@ class TestControllerEventRules(unittest.TestCase):
         for rule in rules:
             self.assertIn('COM0', rule['selectors'])
             self.assertIn('COM1', rule['selectors'])
-            self.assertEqual(rule['handler'], 'serialwrap-event-handler')
+            self.assertEqual(rule['handler'], {"exec": ["serialwrap-event-handler"]})
+
+    def test_event_rules_use_current_serialwrap_schema(self):
+        """Generated rules match the current serialwrap EventEngine schema."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        runner = FakeCommandRunner()
+        controller = RebootController("COM0", runner=runner)
+
+        rules = controller.generate_event_rules()
+        brcm_rule = next(r for r in rules if r["name"] == "brcm-therm")
+
+        self.assertEqual(brcm_rule["schema_version"], 1)
+        self.assertEqual(brcm_rule["owner"], "agent-reboot-controller")
+        self.assertEqual(brcm_rule["rule_id"], "agent-reboot-controller.brcm-therm")
+        self.assertEqual(brcm_rule["kind"], "tool")
+        self.assertEqual(brcm_rule["pattern"], {"kind": "contains", "value": "brcm-therm"})
+        self.assertEqual(brcm_rule["handler"], {"exec": ["serialwrap-event-handler"]})
+        self.assertFalse(brcm_rule["auto_enable_com_on_load"])
     
     def test_brcm_therm_rule_match(self):
         """Test brcm-therm rule has correct match pattern."""
@@ -74,7 +92,7 @@ class TestControllerEventRules(unittest.TestCase):
         rules = controller.generate_event_rules()
         brcm_rule = next(r for r in rules if r['name'] == 'brcm-therm')
         
-        self.assertEqual(brcm_rule['match'], 'brcm-therm')
+        self.assertEqual(brcm_rule['pattern']['value'], 'brcm-therm')
     
     def test_link_down_rule_match(self):
         """Test link-down rule has correct match pattern."""
@@ -86,7 +104,7 @@ class TestControllerEventRules(unittest.TestCase):
         rules = controller.generate_event_rules()
         link_rule = next(r for r in rules if r['name'] == 'link-down')
         
-        self.assertEqual(link_rule['match'], 'Link is Down')
+        self.assertEqual(link_rule['pattern']['value'], 'Link is Down')
     
     def test_pstate_rule_match_case_sensitive(self):
         """Test pstate rule match is case-sensitive lowercase."""
@@ -99,7 +117,7 @@ class TestControllerEventRules(unittest.TestCase):
         pstate_rule = next(r for r in rules if r['name'] == 'pstate')
         
         # Should be lowercase 'pstate', not 'PSTATE' or 'Pstate'
-        self.assertEqual(pstate_rule['match'], 'pstate')
+        self.assertEqual(pstate_rule['pattern']['value'], 'pstate')
     
     def test_kernel_panic_rule_match(self):
         """Test kernel-panic rule has correct match pattern."""
@@ -111,7 +129,7 @@ class TestControllerEventRules(unittest.TestCase):
         rules = controller.generate_event_rules()
         panic_rule = next(r for r in rules if r['name'] == 'kernel-panic')
         
-        self.assertEqual(panic_rule['match'], 'Kernel panic')
+        self.assertEqual(panic_rule['pattern']['value'], 'Kernel panic')
     
     def test_smc_bootloader_rule_match(self):
         """Test smc-bootloader rule has correct match pattern."""
@@ -123,7 +141,7 @@ class TestControllerEventRules(unittest.TestCase):
         rules = controller.generate_event_rules()
         smc_rule = next(r for r in rules if r['name'] == 'smc-bootloader')
         
-        self.assertEqual(smc_rule['match'], 'SMC bootloader')
+        self.assertEqual(smc_rule['pattern']['value'], 'SMC bootloader')
     
     def test_register_event_rules(self):
         """Test registering event rules with serialwrap."""
