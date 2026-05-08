@@ -10,3 +10,9 @@ and hamanpaul project policy v1.0.0.
 ### Added
 - Bootstrap `hamanpaul/log-generator` with the serialwrap reboot log test
   toolkit and paulsha-conventions policy skeleton.
+
+### Changed
+- Update serialwrap reboot-test event rules and handler payload parsing for the
+  current serialwrap EventEngine schema while preserving legacy payload support.
+- Align the policy check workflow with the branch protection required
+  `policy-check` status context.

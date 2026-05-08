@@ -14,3 +14,17 @@ jobs:
       policy_profile: flat
       policy_version: "1.0.0"
       policy_engine_ref: ff1a031172ec24fc155699f9f3ce5bdea24d9e24
+
+  policy-check:
+    name: policy-check
+    runs-on: ubuntu-latest
+    needs: policy
+    if: always()
+    steps:
+      - name: Mirror reusable policy result
+        run: |
+          if [ "${{ needs.policy.result }}" != "success" ]; then
+            echo "Reusable policy workflow result: ${{ needs.policy.result }}"
+            exit 1
+          fi
+          echo "Reusable policy workflow passed."

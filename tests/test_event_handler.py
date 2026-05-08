@@ -45,6 +45,22 @@ class TestPayloadParsing:
         result = parse_event_payload(payload)
         assert result["selector"] == "COM1"
         assert result["event"] == "Kernel panic"
+
+    def test_parse_current_serialwrap_dispatch_payload(self):
+        """Parse payload emitted by the current serialwrap EventEngine."""
+        payload = json.dumps({
+            "selector": "COM1",
+            "rule_id": "agent-reboot-controller.smc-bootloader",
+            "rule_name": "smc-bootloader",
+            "matched_text": "SMC bootloader",
+            "matched_at": 1778121867975,
+        })
+
+        result = parse_event_payload(payload)
+
+        assert result["selector"] == "COM1"
+        assert result["event"] == "SMC bootloader"
+        assert result["timestamp"].startswith("2026-")
     
     def test_parse_payload_rejects_invalid_selector(self):
         """Reject selectors that could escape current-run state matching."""
