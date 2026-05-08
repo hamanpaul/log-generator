@@ -14,3 +14,5 @@ and hamanpaul project policy v1.0.0.
 ### Changed
 - Update serialwrap reboot-test event rules and handler payload parsing for the
   current serialwrap EventEngine schema while preserving legacy payload support.
+- Align the policy check workflow with the branch protection required
+  `policy-check` status context.
