@@ -16,3 +16,9 @@ and hamanpaul project policy v1.0.0.
   current serialwrap EventEngine schema while preserving legacy payload support.
 - Align the policy check workflow with the branch protection required
   `policy-check` status context.
+
+### Fixed
+- Reboot controller startup waits up to 15 s for the async marker echo to land
+  in the minicom capture file before declaring "No active minicom log found",
+  closing a race against `serialwrap cmd submit --mode line` which returns
+  before the echo reaches the target.

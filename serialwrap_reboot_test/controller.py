@@ -136,41 +136,51 @@ class RebootController:
     def find_active_minicom_log(
         self,
         marker: str,
-        max_age_seconds: int = 600
+        max_age_seconds: int = 600,
+        max_wait_seconds: float = 15.0,
+        poll_interval_seconds: float = 0.5,
     ) -> Optional[Path]:
         """Find active minicom log containing marker.
-        
+
+        Polls because `serialwrap cmd submit --mode line` is async — the marker
+        echo can take up to a few seconds to be transmitted to the target,
+        echoed back, and captured by minicom into the log file.
+
         Args:
             marker: Marker string to search for.
             max_age_seconds: Maximum age for log file in seconds.
-            
+            max_wait_seconds: Maximum total time to wait for marker echo to land.
+            poll_interval_seconds: Interval between rescans while waiting.
+
         Returns:
-            Path to active log or None if not found.
+            Path to active log or None if not found within max_wait_seconds.
         """
         pattern = f"mini_{self.selector}_*.log"
-        current_time = time.time()
-        
-        for log_file in self.log_dir.glob(pattern):
-            # Check file age
-            try:
-                mtime = log_file.stat().st_mtime
-                if current_time - mtime > max_age_seconds:
+        deadline = time.time() + max_wait_seconds
+
+        while True:
+            current_time = time.time()
+            for log_file in self.log_dir.glob(pattern):
+                try:
+                    mtime = log_file.stat().st_mtime
+                    if current_time - mtime > max_age_seconds:
+                        continue
+                except OSError as e:
+                    print(f"WARNING: Cannot stat {log_file}: {e}", file=sys.stderr)
                     continue
-            except OSError as e:
-                print(f"WARNING: Cannot stat {log_file}: {e}", file=sys.stderr)
-                continue
-            
-            # Check for marker using streaming read
-            try:
-                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    for line in f:
-                        if marker in line:
-                            return log_file
-            except OSError as e:
-                print(f"WARNING: Cannot read {log_file}: {e}", file=sys.stderr)
-                continue
-        
-        return None
+
+                try:
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        for line in f:
+                            if marker in line:
+                                return log_file
+                except OSError as e:
+                    print(f"WARNING: Cannot read {log_file}: {e}", file=sys.stderr)
+                    continue
+
+            if time.time() >= deadline:
+                return None
+            time.sleep(poll_interval_seconds)
     
     def derive_report_path(self, minicom_log: Path) -> Path:
         """Derive report path from minicom log name.
