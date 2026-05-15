@@ -21,10 +21,30 @@ class ControllerError(Exception):
 
 
 class CommandRunner:
-    """Run commands and return results."""
-    
+    """Run commands and return results.
+
+    For `serialwrap` invocations, automatically inject `--timeout 30` before
+    the subcommand unless the caller already specified `--timeout`. The CLI
+    default (5 s) is not enough when the daemon is under load — high-volume
+    RX (e.g. eth link bouncing during reboot churn) can keep the RPC queued
+    long enough to miss the 5 s window, causing rc=2 and false-positive
+    "daemon not running" errors on the first call after a quiet period.
+    """
+
+    SERIALWRAP_RPC_TIMEOUT_S = "30"
+
+    def _augment_serialwrap(self, cmd: List[str]) -> List[str]:
+        if not cmd:
+            return cmd
+        if not cmd[0].endswith("/serialwrap") and cmd[0] != "serialwrap":
+            return cmd
+        if "--timeout" in cmd or "--endpoint" in cmd:
+            return cmd
+        return [cmd[0], "--timeout", self.SERIALWRAP_RPC_TIMEOUT_S] + list(cmd[1:])
+
     def run(self, cmd: List[str], **kwargs) -> tuple[int, str, str]:
         """Run a command and return (returncode, stdout, stderr)."""
+        cmd = self._augment_serialwrap(cmd)
         result = subprocess.run(
             cmd,
             capture_output=True,

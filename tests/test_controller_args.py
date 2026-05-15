@@ -125,11 +125,51 @@ class TestControllerArgumentParsing(unittest.TestCase):
     def test_parse_args_count_rejects_negative(self):
         """Test that --count rejects negative values."""
         from serialwrap_reboot_test.controller import parse_args
-        
+
         with self.assertRaises(SystemExit) as cm:
             parse_args(["--selector", "COM0", "--count", "-1"])
-        
+
         self.assertNotEqual(cm.exception.code, 0)
+
+
+class TestCommandRunnerSerialwrapTimeout(unittest.TestCase):
+    """`CommandRunner` injects `--timeout 30` ahead of serialwrap subcommands."""
+
+    def test_serialwrap_gets_timeout_injected(self):
+        from serialwrap_reboot_test.controller import CommandRunner
+
+        r = CommandRunner()
+        out = r._augment_serialwrap(
+            ["/home/paul_chen/.paul_tools/serialwrap", "daemon", "status"]
+        )
+        self.assertEqual(
+            out,
+            ["/home/paul_chen/.paul_tools/serialwrap", "--timeout", "30", "daemon", "status"],
+        )
+
+    def test_serialwrap_timeout_not_clobbered_when_caller_set_it(self):
+        from serialwrap_reboot_test.controller import CommandRunner
+
+        r = CommandRunner()
+        cmd = ["/home/paul_chen/.paul_tools/serialwrap", "--timeout", "5", "daemon", "status"]
+        out = r._augment_serialwrap(cmd)
+        self.assertEqual(out, cmd)
+
+    def test_serialwrap_endpoint_form_not_touched(self):
+        from serialwrap_reboot_test.controller import CommandRunner
+
+        r = CommandRunner()
+        cmd = ["/home/paul_chen/.paul_tools/serialwrap", "--endpoint", "tcp://x:1", "daemon", "status"]
+        out = r._augment_serialwrap(cmd)
+        self.assertEqual(out, cmd)
+
+    def test_non_serialwrap_command_left_alone(self):
+        from serialwrap_reboot_test.controller import CommandRunner
+
+        r = CommandRunner()
+        cmd = ["/bin/ls", "-la"]
+        out = r._augment_serialwrap(cmd)
+        self.assertEqual(out, cmd)
 
 
 if __name__ == "__main__":

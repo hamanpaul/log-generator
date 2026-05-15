@@ -18,6 +18,13 @@ and hamanpaul project policy v1.0.0.
   `policy-check` status context.
 
 ### Fixed
+- `CommandRunner` injects `--timeout 30` ahead of every `serialwrap` subcommand
+  (unless the caller already specified `--timeout` or `--endpoint`). The CLI
+  default of 5 s is not enough when the daemon is under sustained load — eth
+  link bouncing during reboot churn keeps the daemon's RPC queue busy, so the
+  first call after a quiet period would time out with rc=2, surfacing as a
+  spurious "serialwrap daemon not running" / "Failed to run session recover"
+  in the reboot controller.
 - Reboot controller registers event rules with an absolute handler path
   (`SERIALWRAP_EVENT_HANDLER` env var, defaulting to
   `<project_root>/bin/serialwrap-event-handler`). Previously the rule stored
