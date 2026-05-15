@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
-from .constants import SERIALWRAP_CMD
+from .constants import SERIALWRAP_CMD, SERIALWRAP_EVENT_HANDLER
 
 
 class ControllerError(Exception):
@@ -263,7 +263,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "brcm-therm"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -274,7 +274,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "Link is Down"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -285,7 +285,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "pstate"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -296,7 +296,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "Kernel panic"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -307,7 +307,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "SMC bootloader"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             }
         ]

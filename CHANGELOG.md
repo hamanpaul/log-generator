@@ -18,6 +18,13 @@ and hamanpaul project policy v1.0.0.
   `policy-check` status context.
 
 ### Fixed
+- Reboot controller registers event rules with an absolute handler path
+  (`SERIALWRAP_EVENT_HANDLER` env var, defaulting to
+  `<project_root>/bin/serialwrap-event-handler`). Previously the rule stored
+  the bare name `serialwrap-event-handler`, which `serialwrap` runs via
+  `subprocess.Popen` without a shell — every fire failed with
+  `FileNotFoundError`, so the event markdown report was never generated even
+  though hundreds of events matched.
 - Reboot controller startup waits up to 15 s for the async marker echo to land
   in the minicom capture file before declaring "No active minicom log found",
   closing a race against `serialwrap cmd submit --mode line` which returns
