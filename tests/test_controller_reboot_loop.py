@@ -235,44 +235,44 @@ class TestControllerRebootLoop(unittest.TestCase):
             self.assertFalse(result)
     
     def test_send_raw_broker_command_reset(self):
-        """Test sending raw broker command for reset."""
+        """Test sending raw recovery command for reset (now via `cmd submit`)."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
         controller = RebootController("COM0", runner=runner)
-        
+
         timestamp = controller.send_raw_broker_command("reset")
-        
+
         # Should return a timestamp
         self.assertIsNotNone(timestamp)
         self.assertIsInstance(timestamp, float)
-        
-        # Should have sent via broker raw/console
+
+        # Should have routed through `cmd submit` with the raw command text.
         cmd_found = False
         for cmd in runner.commands:
             cmd_str = ' '.join(cmd)
-            if 'broker' in cmd_str and 'raw' in cmd_str and 'reset' in cmd_str:
+            if 'cmd' in cmd_str and 'submit' in cmd_str and 'reset' in cmd_str and 'COM0' in cmd_str:
                 cmd_found = True
                 break
         self.assertTrue(cmd_found)
-    
+
     def test_send_raw_broker_command_reboot_force(self):
-        """Test sending raw broker command for reboot -f."""
+        """Test sending raw recovery command for reboot -f (now via `cmd submit`)."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
         controller = RebootController("COM1", runner=runner)
-        
+
         timestamp = controller.send_raw_broker_command("reboot -f")
-        
+
         # Should return a timestamp
         self.assertIsNotNone(timestamp)
-        
-        # Should have sent via broker raw/console
+
+        # Should have routed through `cmd submit` with the raw command text.
         cmd_found = False
         for cmd in runner.commands:
             cmd_str = ' '.join(cmd)
-            if 'broker' in cmd_str and 'raw' in cmd_str and 'reboot -f' in cmd_str:
+            if 'cmd' in cmd_str and 'submit' in cmd_str and 'reboot -f' in cmd_str and 'COM1' in cmd_str:
                 cmd_found = True
                 break
         self.assertTrue(cmd_found)

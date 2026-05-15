@@ -110,16 +110,16 @@ class TestCriticalCommandErrorHandling(unittest.TestCase):
     def test_send_raw_broker_command_failure(self):
         """Test send_raw_broker_command raises ControllerError on failure."""
         from serialwrap_reboot_test.controller import RebootController, ControllerError
-        
+
         runner = FakeCommandRunner()
-        runner.set_response('broker raw', 1, "", "Failed to send raw command")
-        
+        runner.set_response('cmd submit', 1, "", "Failed to send raw command")
+
         controller = RebootController("COM1", runner=runner)
-        
+
         with self.assertRaises(ControllerError) as cm:
             controller.send_raw_broker_command("reset")
-        
-        self.assertIn("broker", str(cm.exception).lower())
+
+        self.assertIn("raw", str(cm.exception).lower())
     
     def test_cleanup_continues_despite_disable_failure(self):
         """Test cleanup removes state dir even if disable fails."""
@@ -235,76 +235,76 @@ class TestCriticalCommandErrorHandling(unittest.TestCase):
     def test_run_loop_handles_raw_reset_failure(self):
         """Test run_loop handles raw reset failure gracefully."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = Path(tmpdir) / "mini_COM1_test.log"
             log_file.write_text("boot log\n=>\n")
-            
+
             runner = FakeCommandRunner()
             runner.set_response('session list', 0,
-                json.dumps({"sessions": [{"selector": "COM1", "state": "RECOVERY"}]}))
-            runner.set_response('broker raw', 1, "", "Failed to send raw command")
-            
+                json.dumps({"sessions": [{"com": "COM1", "state": "RECOVERY"}]}))
+            runner.set_response('cmd submit', 1, "", "Failed to send raw command")
+
             controller = RebootController("COM1", runner=runner, log_dir=tmpdir)
             controller.active_log_path = log_file
             controller.last_action_time = None  # Force past throttle
-            
+
             # Mock sleep
             sleep_called = []
             controller.sleep_fn = lambda s: sleep_called.append(s)
-            
+
             stderr_output = []
             original_stderr = sys.stderr.write
             def mock_stderr(msg):
                 stderr_output.append(msg)
                 return original_stderr(msg)
-            
+
             with patch('sys.stderr.write', mock_stderr):
                 # Should not raise, should handle gracefully
                 controller.run_loop()
-            
+
             # Should have slept
             self.assertTrue(len(sleep_called) > 0)
-            
+
             # Should have printed error
-            self.assertTrue(any('ERROR' in msg or 'broker' in msg for msg in stderr_output))
-    
+            self.assertTrue(any('ERROR' in msg or 'raw' in msg for msg in stderr_output))
+
     def test_run_loop_handles_raw_reboot_failure(self):
         """Test run_loop handles raw reboot failure gracefully."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = Path(tmpdir) / "mini_COM0_test.log"
             log_file.write_text("boot log\nroot@prplOS:/# \n")
-            
+
             runner = FakeCommandRunner()
             runner.set_response('session list', 0,
-                json.dumps({"sessions": [{"selector": "COM0", "state": "RECOVERY"}]}))
-            runner.set_response('broker raw', 1, "", "Failed to send raw reboot")
-            
+                json.dumps({"sessions": [{"com": "COM0", "state": "RECOVERY"}]}))
+            runner.set_response('cmd submit', 1, "", "Failed to send raw reboot")
+
             controller = RebootController("COM0", runner=runner, log_dir=tmpdir)
             controller.active_log_path = log_file
             controller.last_action_time = None
-            
+
             # Mock sleep
             sleep_called = []
             controller.sleep_fn = lambda s: sleep_called.append(s)
-            
+
             stderr_output = []
             original_stderr = sys.stderr.write
             def mock_stderr(msg):
                 stderr_output.append(msg)
                 return original_stderr(msg)
-            
+
             with patch('sys.stderr.write', mock_stderr):
                 # Should not raise
                 controller.run_loop()
-            
+
             # Should have slept
             self.assertTrue(len(sleep_called) > 0)
-            
+
             # Should have printed error
-            self.assertTrue(any('ERROR' in msg or 'broker' in msg or 'reboot' in msg for msg in stderr_output))
+            self.assertTrue(any('ERROR' in msg or 'raw' in msg or 'reboot' in msg for msg in stderr_output))
 
 
 if __name__ == "__main__":

@@ -22,3 +22,11 @@ and hamanpaul project policy v1.0.0.
   in the minicom capture file before declaring "No active minicom log found",
   closing a race against `serialwrap cmd submit --mode line` which returns
   before the echo reaches the target.
+- Align reboot controller's serialwrap CLI usage with the current daemon:
+  `event add --file <path>` (was `--rule <json>`), `event rm <rule_id>`
+  positional (was `--name`), `session list` reads each session's `com` field
+  (legacy `selector` field is also still accepted), `event status` recognises
+  both the current `{"coms": [...]}` schema and the legacy
+  `{"selectors": {...}}` schema, and the recovery `raw_reset` / `raw_reboot`
+  paths route through `cmd submit` (the legacy `broker raw` subcommand was
+  removed). Tests updated to cover both old and new shapes.

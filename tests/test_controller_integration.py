@@ -250,20 +250,20 @@ class TestControllerIntegration(unittest.TestCase):
             self.assertEqual(controller.reboot_count, 1)
     
     def test_run_loop_executes_raw_reset(self):
-        """Test run loop executes raw reset fallback."""
+        """Test run loop executes raw reset fallback (now via `cmd submit`)."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = Path(tmpdir) / "mini_COM0_test.log"
             log_file.write_text("boot log\n=>\n")
-            
+
             runner = FakeCommandRunner()
             # Simulate NOT READY
-            runner.set_response('session list', 0, 
-                json.dumps({"sessions": [{"selector": "COM0", "state": "RECOVERY"}]}))
-            
+            runner.set_response('session list', 0,
+                json.dumps({"sessions": [{"com": "COM0", "state": "RECOVERY"}]}))
+
             controller = RebootController("COM0", runner=runner, log_dir=tmpdir, count_limit=1)
-            
+
             # Intercept marker to create log
             original_send_marker = controller.send_marker_command
             def tracked_send_marker():
@@ -271,17 +271,20 @@ class TestControllerIntegration(unittest.TestCase):
                 log_file.write_text(f"boot log\n{marker}\n=>\n")
                 return marker
             controller.send_marker_command = tracked_send_marker
-            
+
             controller.startup()
             # Set last action time to allow recovery
             controller.last_action_time = time.time() - 400
-            
+
             # Run one loop iteration
             controller.run_loop()
-            
-            # Should have sent raw reset
-            raw_reset = any('broker raw' in ' '.join(cmd) and 'reset' in ' '.join(cmd) 
-                           for cmd in runner.commands)
+
+            # Should have sent raw reset via cmd submit
+            raw_reset = any(
+                'cmd' in ' '.join(cmd) and 'submit' in ' '.join(cmd)
+                and 'reset' in ' '.join(cmd) and 'COM0' in ' '.join(cmd)
+                for cmd in runner.commands
+            )
             self.assertTrue(raw_reset)
     
     def test_run_loop_sleeps_on_wait(self):

@@ -307,20 +307,36 @@ class RebootController:
     
     def register_event_rules(self) -> None:
         """Register event rules with serialwrap.
-        
+
+        Current serialwrap CLI accepts rules via `event add --file <path>`
+        rather than the legacy `--rule <json>` form.
+
         Raises:
             ControllerError: If rule registration fails.
         """
+        import tempfile
         rules = self.generate_event_rules()
         for rule in rules:
-            rule_json = json.dumps(rule)
-            returncode, stdout, stderr = self.runner.run([
-                SERIALWRAP_CMD, "event", "add",
-                "--rule", rule_json
-            ])
-            
-            if returncode != 0:
-                raise ControllerError(f"Failed to add event rule {rule['name']}: {stderr}")
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", prefix=f"rule_{rule['name']}_",
+                delete=False, encoding="utf-8"
+            ) as tf:
+                json.dump(rule, tf)
+                tmp_path = tf.name
+            try:
+                returncode, stdout, stderr = self.runner.run([
+                    SERIALWRAP_CMD, "event", "add",
+                    "--file", tmp_path
+                ])
+                if returncode != 0:
+                    raise ControllerError(
+                        f"Failed to add event rule {rule['name']}: {stderr}"
+                    )
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
     
     def enable_selector(self) -> None:
         """Enable event matcher for this selector.
@@ -384,20 +400,28 @@ class RebootController:
             if not isinstance(status, dict):
                 print("WARNING: Unexpected event status format: top-level JSON is not an object", file=sys.stderr)
                 return None
-            
-            selectors = status.get("selectors", {})
-            if not isinstance(selectors, dict):
-                print("WARNING: Unexpected event status format: selectors is not an object", file=sys.stderr)
-                return None
-            
-            for selector, info in selectors.items():
-                if not isinstance(info, dict):
-                    print(f"WARNING: Unexpected event status format for {selector}", file=sys.stderr)
-                    return None
-                if selector != self.selector and info.get("enabled"):
-                    return True
-            
-            return False
+
+            # Current schema: {"coms": ["COM0", ...]} listing enabled COMs.
+            coms = status.get("coms")
+            if isinstance(coms, list):
+                for com in coms:
+                    if com != self.selector:
+                        return True
+                return False
+
+            # Legacy schema fallback: {"selectors": {"COMx": {"enabled": bool}}}.
+            selectors = status.get("selectors")
+            if isinstance(selectors, dict):
+                for selector, info in selectors.items():
+                    if not isinstance(info, dict):
+                        print(f"WARNING: Unexpected event status format for {selector}", file=sys.stderr)
+                        return None
+                    if selector != self.selector and info.get("enabled"):
+                        return True
+                return False
+
+            print("WARNING: event status missing both 'coms' and 'selectors' fields", file=sys.stderr)
+            return None
         except json.JSONDecodeError as e:
             print(f"WARNING: Failed to parse event status JSON: {e}", file=sys.stderr)
             return None
@@ -407,7 +431,10 @@ class RebootController:
     
     def remove_event_rules(self) -> None:
         """Remove shared event rules.
-        
+
+        Current serialwrap CLI accepts `event rm <rule_id>` (positional) rather
+        than the legacy `--name <name>` form.
+
         Raises:
             ControllerError: If rule removal fails.
         """
@@ -415,9 +442,9 @@ class RebootController:
         for rule in rules:
             returncode, stdout, stderr = self.runner.run([
                 SERIALWRAP_CMD, "event", "rm",
-                "--name", rule["name"]
+                rule["rule_id"]
             ])
-            
+
             if returncode != 0:
                 raise ControllerError(f"Failed to remove event rule {rule['name']}: {stderr}")
     
@@ -434,7 +461,7 @@ class RebootController:
             data = json.loads(stdout)
             sessions = data.get("sessions", [])
             for session in sessions:
-                if session.get("selector") == self.selector:
+                if session.get("com") == self.selector or session.get("selector") == self.selector:
                     return session.get("state") == "READY"
             return False
         except json.JSONDecodeError as e:
@@ -558,26 +585,34 @@ class RebootController:
             return False
     
     def send_raw_broker_command(self, command: str) -> float:
-        """Send raw broker command.
-        
+        """Send raw command directly to the session via `cmd submit`.
+
+        The legacy `serialwrap broker raw` subcommand was removed from the
+        current CLI; recovery paths now route raw input through `cmd submit`
+        with source `agent:reboot-controller-raw`, which still hands the bytes
+        plus a trailing newline to the UART even when the target is sitting at
+        a non-shell prompt (e.g. u-boot `=>`).
+
         Args:
             command: Command string to send.
-            
+
         Returns:
             Timestamp of command submission.
-            
+
         Raises:
-            ControllerError: If broker command fails.
+            ControllerError: If submit fails.
         """
         returncode, stdout, stderr = self.runner.run([
-            SERIALWRAP_CMD, "broker", "raw",
+            SERIALWRAP_CMD, "cmd", "submit",
             "--selector", self.selector,
-            "--input", command
+            "--source", "agent:reboot-controller-raw",
+            "--mode", "line",
+            "--cmd", command
         ])
-        
+
         if returncode != 0:
-            raise ControllerError(f"Failed to send raw broker command '{command}' to {self.selector}: {stderr}")
-        
+            raise ControllerError(f"Failed to send raw command '{command}' to {self.selector}: {stderr}")
+
         return time.time()
     
     def decide_reboot_action(

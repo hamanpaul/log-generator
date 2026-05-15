@@ -234,9 +234,9 @@ class TestControllerEventRules(unittest.TestCase):
     def test_check_other_selectors_none_enabled(self):
         """Test checking when no other COM selectors are enabled."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
-        
+
         # Simulate all disabled
         status_output = json.dumps({
             "selectors": {
@@ -245,12 +245,30 @@ class TestControllerEventRules(unittest.TestCase):
             }
         })
         runner.set_response('event status', 0, status_output)
-        
+
         controller = RebootController("COM1", runner=runner)
         result = controller.check_other_selectors_enabled()
-        
+
         # No other selectors enabled, so should return False
         self.assertFalse(result)
+
+    def test_check_other_selectors_current_schema_enabled(self):
+        """Current serialwrap reports enabled COMs in a top-level `coms` list."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        runner = FakeCommandRunner()
+        runner.set_response('event status', 0, json.dumps({"coms": ["COM0", "COM1"]}))
+        controller = RebootController("COM0", runner=runner)
+        self.assertTrue(controller.check_other_selectors_enabled())
+
+    def test_check_other_selectors_current_schema_alone(self):
+        """Only this selector enabled in the `coms` list -> False."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        runner = FakeCommandRunner()
+        runner.set_response('event status', 0, json.dumps({"coms": ["COM0"]}))
+        controller = RebootController("COM0", runner=runner)
+        self.assertFalse(controller.check_other_selectors_enabled())
     
     def test_remove_event_rules(self):
         """Test removing shared event rules."""
