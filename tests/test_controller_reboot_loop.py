@@ -340,6 +340,56 @@ class TestControllerRebootLoop(unittest.TestCase):
             # Should have run recover, then wait since no prompt
             self.assertEqual(action['type'], 'wait')
 
+    def test_in_boot_guard_none_last_action(self):
+        """No last_action means no boot guard active."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        controller = RebootController("COM0")
+        self.assertFalse(controller.in_boot_guard(None))
+
+    def test_in_boot_guard_within_window(self):
+        """last_action within boot_guard_seconds -> guard active."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        controller = RebootController("COM0")
+        controller.boot_guard_seconds = 90.0
+        self.assertTrue(controller.in_boot_guard(time.time() - 10))
+
+    def test_in_boot_guard_past_window(self):
+        """last_action past boot_guard_seconds -> guard cleared."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        controller = RebootController("COM0")
+        controller.boot_guard_seconds = 90.0
+        self.assertFalse(controller.in_boot_guard(time.time() - 91))
+
+    def test_reboot_decision_skips_probe_during_boot_guard(self):
+        """During boot guard, decide_reboot_action returns wait without probing.
+
+        Critical to keep `echo __READY__` out of u-boot's autoboot window.
+        """
+        from serialwrap_reboot_test.controller import RebootController
+
+        runner = FakeCommandRunner()
+        # Wire READY+OK so the only thing keeping the loop from rebooting is
+        # the guard. If the guard is not honoured we would see normal_reboot.
+        runner.set_response('session list', 0,
+            json.dumps({"sessions": [{"com": "COM0", "state": "READY"}]}))
+        runner.set_response('session self-test', 0,
+            json.dumps({"classification": "OK", "probe_ok": True}))
+
+        controller = RebootController("COM0", runner=runner)
+        controller.boot_guard_seconds = 90.0
+
+        action = controller.decide_reboot_action(time.time() - 30)
+
+        self.assertEqual(action['type'], 'wait')
+        # No UART-touching call should have been issued during the guard.
+        for cmd in runner.commands:
+            joined = ' '.join(cmd)
+            self.assertNotIn('self-test', joined)
+            self.assertNotIn('recover', joined)
+
 
 if __name__ == "__main__":
     unittest.main()

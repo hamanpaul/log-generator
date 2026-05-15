@@ -94,6 +94,14 @@ class RebootController:
         self.last_action_time: Optional[float] = None
         self.sleep_fn = time.sleep  # Injectable for testing
         self.loop_delay = 10  # Configurable loop delay in seconds
+        # Boot guard: after submitting a reboot the target passes through
+        # u-boot, where ANY byte aborts the autoboot countdown and traps us
+        # at the `=>` prompt. Suppress every UART-sending probe (self-test /
+        # session recover / raw reset / raw reboot) for this many seconds
+        # after the last action so probes never land in the u-boot window.
+        # 90 s covers BGW720/prplOS bootmsg's ~46 s of "Delay complete(23 secs)"
+        # plus u-boot + kernel + init headroom.
+        self.boot_guard_seconds = 90.0
         
     def check_serialwrap_event_support(self) -> bool:
         """Check if serialwrap supports event subcommand."""
@@ -615,22 +623,40 @@ class RebootController:
 
         return time.time()
     
+    def in_boot_guard(self, last_action: Optional[float]) -> bool:
+        """Return True if we are still in the post-reboot boot-guard window.
+
+        While the target is booting through u-boot, any byte we send aborts
+        the autoboot countdown and strands us at the `=>` prompt. The guard
+        keeps the controller silent on the UART until u-boot has handed off
+        to the kernel.
+        """
+        if last_action is None:
+            return False
+        return (time.time() - last_action) < self.boot_guard_seconds
+
     def decide_reboot_action(
         self,
         last_action: Optional[float]
     ) -> Dict[str, Any]:
         """Decide next reboot action.
-        
+
         Args:
             last_action: Timestamp of last reboot or fallback action.
-            
+
         Returns:
             Dictionary with action type and details.
         """
+        # Boot guard: during the boot window, neither probe (self-test /
+        # session recover) nor raw key injection is safe — sending any byte
+        # while the target is in u-boot autoboot traps it at `=>`.
+        if self.in_boot_guard(last_action):
+            return {"type": "wait"}
+
         # Check if READY and self-test OK
         if self.check_ready_state() and self.check_self_test():
             return {"type": "normal_reboot"}
-        
+
         # Not READY - check throttle
         if self.should_throttle_recovery(last_action):
             return {"type": "wait"}
