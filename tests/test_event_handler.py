@@ -356,6 +356,43 @@ class TestEventHandlerIntegration:
             report_path = tmpdir / f"event-triggered_COM0_{log_path.stem.split('_', 2)[2]}.md"
             assert report_path.exists()
     
+    def test_handle_event_tolerates_non_utf8_bytes_in_log(self):
+        """Handler must not crash on UART noise (0xff etc.) in the minicom log.
+
+        Regression: prior to errors='ignore', boot capture containing 0xff
+        bytes (UART escape/control noise) raised UnicodeDecodeError inside
+        scan_log_for_events, every fire after the first failed with exit=1,
+        and the markdown report stopped being updated.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            log_path = tmpdir / "mini_COM0_260506-152744.log"
+            # Mix of ascii lines and a binary blob containing 0xff bytes that
+            # are NOT valid UTF-8 continuation bytes.
+            log_path.write_bytes(
+                b"line 1\n"
+                b"line 2 \xff\xfe\xff noise\n"
+                b"line 3 brcm-therm hit\n"
+            )
+
+            state_dir = tmpdir / "serialwrap-reboot-test.COM0.12345"
+            state_dir.mkdir()
+            (state_dir / "active_minicom_log.txt").write_text(str(log_path))
+
+            payload = {
+                "selector": "COM0",
+                "event": "brcm-therm",
+                "timestamp": "2026-05-06T16:10:23+08:00",
+            }
+
+            result = handle_event(payload, state_root=tmpdir, log_dir=tmpdir)
+            assert result == 0
+
+            report_path = tmpdir / f"event-triggered_COM0_{log_path.stem.split('_', 2)[2]}.md"
+            assert report_path.exists()
+            assert "brcm-therm" in report_path.read_text()
+
     def test_handle_event_missing_log_returns_nonzero(self):
         """Return non-zero if log cannot be resolved."""
         with tempfile.TemporaryDirectory() as tmpdir:

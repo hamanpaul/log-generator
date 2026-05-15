@@ -18,6 +18,12 @@ and hamanpaul project policy v1.0.0.
   `policy-check` status context.
 
 ### Fixed
+- Event handler reads the minicom capture with `errors='ignore'` instead of
+  strict UTF-8, so UART noise (e.g. stray `0xff` bytes during boot) no longer
+  raises `UnicodeDecodeError` and aborts the handler. Prior to this fix, the
+  first fire on a fresh capture would succeed but every subsequent fire crashed
+  with exit=1, so the markdown summary stopped updating even though events
+  kept matching.
 - `CommandRunner` injects `--timeout 30` ahead of every `serialwrap` subcommand
   (unless the caller already specified `--timeout` or `--endpoint`). The CLI
   default of 5 s is not enough when the daemon is under sustained load — eth

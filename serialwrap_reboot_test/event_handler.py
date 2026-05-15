@@ -649,9 +649,11 @@ def handle_event(
             cursors = load_scan_cursors(cursor_file)
             start_line = cursors.get(event_name, 0)
             
-            # Scan log for next match (streaming - only consume first match)
+            # Scan log for next match (streaming - only consume first match).
+            # UART captures can contain non-UTF-8 bytes (0xff control sequences,
+            # binary noise during boot); ignore decode errors rather than abort.
             try:
-                with log_path.open() as f:
+                with log_path.open(encoding='utf-8', errors='ignore') as f:
                     match_iter = scan_log_for_events(f, event_name, start_line=start_line)
                     try:
                         line_number, line_text = next(match_iter)
