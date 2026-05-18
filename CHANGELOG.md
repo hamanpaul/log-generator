@@ -18,6 +18,13 @@ and hamanpaul project policy v1.0.0.
   `policy-check` status context.
 
 ### Fixed
+- `fault_installer.build_fault_injector_script()` random source switched
+  from `od -An -N2 -tu2 /dev/urandom` to `sha256sum` over `dd` bytes from
+  `/dev/urandom`. BGW720 / prplOS BusyBox lacks `od`, so the previous
+  implementation silently returned 0 from `get_random` on every call,
+  collapsing the 10% gate into 100% and pinning the fault-type selector
+  to type 0. With the new random source the gate and type cycle both
+  function as intended.
 - `fault_installer.build_init_script()` now emits an OpenWrt/procd-style
   init script: shebang `#!/bin/sh /etc/rc.common`, a `START=50` priority,
   and a `start()` function. The previous plain SysV `case "$1" in start)`
