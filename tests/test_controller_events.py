@@ -108,15 +108,21 @@ class TestControllerEventRules(unittest.TestCase):
         self.assertEqual(brcm_rule['pattern']['value'], 'brcm-therm')
     
     def test_link_down_rule_match(self):
-        """Test link-down rule has correct match pattern."""
+        """Test link-down rule has correct match pattern.
+
+        Intentionally `Link is Down` (not bare `Link Down`): the longer
+        substring is the BSP marker printed by `ethctl eth0 phy-reset`
+        (fault injector type 1), distinguishing injected faults from the
+        background eth0 flap noise.
+        """
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
         controller = RebootController("COM1", runner=runner)
-        
+
         rules = controller.generate_event_rules()
         link_rule = next(r for r in rules if r['name'] == 'link-down')
-        
+
         self.assertEqual(link_rule['pattern']['value'], 'Link is Down')
     
     def test_pstate_rule_match_case_sensitive(self):

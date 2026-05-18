@@ -77,27 +77,27 @@ exit 0
 
 def build_init_script() -> str:
     """Build the init script content for /etc/init.d.
-    
-    Returns a shell script that calls the fault injector on start.
+
+    OpenWrt / prplOS use procd; boot dispatches through `/etc/rc.common`
+    via the shebang `#!/bin/sh /etc/rc.common`. Plain SysV-style
+    `case "$1" in start) ...` scripts are NOT executed by the boot
+    sequence even though the `/etc/rc.d/SNN<name>` symlink exists, so
+    the fault injector previously never ran at boot. Use the rc.common
+    pattern (`START=N` + a `start()` function) so procd will invoke us.
     """
-    return '''#!/bin/sh
-# Init script for serialwrap-fault-injector
-# Run at boot via S50 symlink
+    return '''#!/bin/sh /etc/rc.common
+# Serialwrap fault injector init - runs once at boot
+# Dispatched by OpenWrt procd via the S50 symlink in /etc/rc.d.
 
-case "$1" in
-    start)
-        /usr/sbin/serialwrap-fault-injector > /dev/null 2>&1
-        ;;
-    stop|restart|reload)
-        # No-op - injector runs once at boot
-        ;;
-    *)
-        echo "Usage: $0 {start|stop|restart|reload}"
-        exit 1
-        ;;
-esac
+START=50
 
-exit 0
+start() {
+    /usr/sbin/serialwrap-fault-injector > /dev/null 2>&1
+}
+
+stop() {
+    return 0
+}
 '''
 
 

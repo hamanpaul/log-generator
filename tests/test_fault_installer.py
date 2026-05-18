@@ -137,9 +137,37 @@ class TestInitScript(unittest.TestCase):
     def test_init_script_handles_start(self):
         """Test that the init script handles start command."""
         from serialwrap_reboot_test.fault_installer import build_init_script
-        
+
         script = build_init_script()
         self.assertIn('start', script)
+
+    def test_init_script_uses_rc_common_shebang(self):
+        """Init script must use OpenWrt rc.common dispatcher so procd runs it.
+
+        Plain `#!/bin/sh` SysV-style scripts in /etc/init.d are NOT executed
+        at boot by OpenWrt/prplOS even when the /etc/rc.d/S<NN><name>
+        symlink exists. The shebang `#!/bin/sh /etc/rc.common` is what
+        makes procd dispatch boot/enable/start actions.
+        """
+        from serialwrap_reboot_test.fault_installer import build_init_script
+
+        script = build_init_script()
+        first_line = script.splitlines()[0]
+        self.assertEqual(first_line, '#!/bin/sh /etc/rc.common')
+
+    def test_init_script_declares_START_priority(self):
+        """rc.common reads `START=N` to schedule the rc.d/SNN symlink."""
+        from serialwrap_reboot_test.fault_installer import build_init_script
+
+        script = build_init_script()
+        self.assertRegex(script, r'(?m)^START=\d+\s*$')
+
+    def test_init_script_defines_start_function(self):
+        """rc.common dispatches to the `start()` function on boot."""
+        from serialwrap_reboot_test.fault_installer import build_init_script
+
+        script = build_init_script()
+        self.assertRegex(script, r'(?m)^start\(\)\s*\{')
 
 
 class TestFaultInstallerFallback(unittest.TestCase):

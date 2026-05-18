@@ -17,6 +17,10 @@ SELECTOR_PATTERN = re.compile(r"^COM[0-9]+$")
 
 EVENT_MATCH_TEXT = {
     "brcm-therm": "brcm-therm",
+    # "Link is Down" is the specific BSP message emitted by
+    # `ethctl eth0 phy-reset` (fault injector type 1). The generic
+    # "Link Down" eth0 flap noise is intentionally not in this map so
+    # the report only counts injected faults, not background bouncing.
     "link-down": "Link is Down",
     "Link is Down": "Link is Down",
     "pstate": "pstate",

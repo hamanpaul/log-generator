@@ -293,6 +293,11 @@ class RebootController:
                 "rule_id": f"{owner}.link-down",
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
+                # Intentionally specific: `Link is Down` is the BSP marker
+                # printed by `ethctl eth0 phy-reset` (fault injector type 1),
+                # not the generic `Link Down` eth0 flap noise that the BSP
+                # also emits. Keep this exact substring to count only
+                # injected faults.
                 "pattern": {"kind": "contains", "value": "Link is Down"},
                 "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False

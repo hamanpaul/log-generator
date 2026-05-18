@@ -18,6 +18,16 @@ and hamanpaul project policy v1.0.0.
   `policy-check` status context.
 
 ### Fixed
+- `fault_installer.build_init_script()` now emits an OpenWrt/procd-style
+  init script: shebang `#!/bin/sh /etc/rc.common`, a `START=50` priority,
+  and a `start()` function. The previous plain SysV `case "$1" in start)`
+  template was never executed by OpenWrt/prplOS boot — procd ignores
+  non-rc.common scripts even when the `/etc/rc.d/SNN<name>` symlink is
+  present. Consequence on BGW720 over a 58 h soak: fault injector
+  installed but never invoked at boot, so types 1–3 (link reset, process
+  abort, kernel panic) injected zero events. The brcm-therm rule still
+  fired only because the legit `bcm_thermal_drv` driver init prints the
+  same `Trip 0: threshold=…` text that the fault injector echoes.
 - Event handler reads the minicom capture with `errors='ignore'` instead of
   strict UTF-8, so UART noise (e.g. stray `0xff` bytes during boot) no longer
   raises `UnicodeDecodeError` and aborts the handler. Prior to this fix, the
