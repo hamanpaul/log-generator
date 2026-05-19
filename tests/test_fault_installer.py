@@ -23,6 +23,24 @@ class TestFaultInjectorScript(unittest.TestCase):
         script = build_fault_injector_script()
         self.assertTrue(script.startswith('#!/bin/sh'))
 
+    def test_fault_injector_random_source_uses_sha256sum(self):
+        """Random source must not depend on `od`.
+
+        Regression: BGW720 / prplOS BusyBox build omits `od` (verified by
+        `which sha256sum sha1sum md5sum cksum base64 od dd` during the
+        soak setup — only sha256sum / md5sum / dd are present). The
+        previous implementation called `od -An -N2 -tu2 /dev/urandom`
+        and silently fell through to `echo 0`, so the 10% gate became
+        100% and the type selector always picked type 0.
+        """
+        from serialwrap_reboot_test.fault_installer import build_fault_injector_script
+
+        script = build_fault_injector_script()
+        self.assertNotIn(' od ', script)
+        self.assertNotIn('od -An', script)
+        self.assertIn('sha256sum', script)
+        self.assertIn('/dev/urandom', script)
+
     def test_fault_injector_has_10_percent_probability(self):
         """Test that the fault injector has a 10% probability gate."""
         from serialwrap_reboot_test.fault_installer import build_fault_injector_script
@@ -137,9 +155,37 @@ class TestInitScript(unittest.TestCase):
     def test_init_script_handles_start(self):
         """Test that the init script handles start command."""
         from serialwrap_reboot_test.fault_installer import build_init_script
-        
+
         script = build_init_script()
         self.assertIn('start', script)
+
+    def test_init_script_uses_rc_common_shebang(self):
+        """Init script must use OpenWrt rc.common dispatcher so procd runs it.
+
+        Plain `#!/bin/sh` SysV-style scripts in /etc/init.d are NOT executed
+        at boot by OpenWrt/prplOS even when the /etc/rc.d/S<NN><name>
+        symlink exists. The shebang `#!/bin/sh /etc/rc.common` is what
+        makes procd dispatch boot/enable/start actions.
+        """
+        from serialwrap_reboot_test.fault_installer import build_init_script
+
+        script = build_init_script()
+        first_line = script.splitlines()[0]
+        self.assertEqual(first_line, '#!/bin/sh /etc/rc.common')
+
+    def test_init_script_declares_START_priority(self):
+        """rc.common reads `START=N` to schedule the rc.d/SNN symlink."""
+        from serialwrap_reboot_test.fault_installer import build_init_script
+
+        script = build_init_script()
+        self.assertRegex(script, r'(?m)^START=\d+\s*$')
+
+    def test_init_script_defines_start_function(self):
+        """rc.common dispatches to the `start()` function on boot."""
+        from serialwrap_reboot_test.fault_installer import build_init_script
+
+        script = build_init_script()
+        self.assertRegex(script, r'(?m)^start\(\)\s*\{')
 
 
 class TestFaultInstallerFallback(unittest.TestCase):

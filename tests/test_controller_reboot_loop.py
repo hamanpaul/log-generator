@@ -235,44 +235,44 @@ class TestControllerRebootLoop(unittest.TestCase):
             self.assertFalse(result)
     
     def test_send_raw_broker_command_reset(self):
-        """Test sending raw broker command for reset."""
+        """Test sending raw recovery command for reset (now via `cmd submit`)."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
         controller = RebootController("COM0", runner=runner)
-        
+
         timestamp = controller.send_raw_broker_command("reset")
-        
+
         # Should return a timestamp
         self.assertIsNotNone(timestamp)
         self.assertIsInstance(timestamp, float)
-        
-        # Should have sent via broker raw/console
+
+        # Should have routed through `cmd submit` with the raw command text.
         cmd_found = False
         for cmd in runner.commands:
             cmd_str = ' '.join(cmd)
-            if 'broker' in cmd_str and 'raw' in cmd_str and 'reset' in cmd_str:
+            if 'cmd' in cmd_str and 'submit' in cmd_str and 'reset' in cmd_str and 'COM0' in cmd_str:
                 cmd_found = True
                 break
         self.assertTrue(cmd_found)
-    
+
     def test_send_raw_broker_command_reboot_force(self):
-        """Test sending raw broker command for reboot -f."""
+        """Test sending raw recovery command for reboot -f (now via `cmd submit`)."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
         controller = RebootController("COM1", runner=runner)
-        
+
         timestamp = controller.send_raw_broker_command("reboot -f")
-        
+
         # Should return a timestamp
         self.assertIsNotNone(timestamp)
-        
-        # Should have sent via broker raw/console
+
+        # Should have routed through `cmd submit` with the raw command text.
         cmd_found = False
         for cmd in runner.commands:
             cmd_str = ' '.join(cmd)
-            if 'broker' in cmd_str and 'raw' in cmd_str and 'reboot -f' in cmd_str:
+            if 'cmd' in cmd_str and 'submit' in cmd_str and 'reboot -f' in cmd_str and 'COM1' in cmd_str:
                 cmd_found = True
                 break
         self.assertTrue(cmd_found)
@@ -339,6 +339,56 @@ class TestControllerRebootLoop(unittest.TestCase):
             
             # Should have run recover, then wait since no prompt
             self.assertEqual(action['type'], 'wait')
+
+    def test_in_boot_guard_none_last_action(self):
+        """No last_action means no boot guard active."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        controller = RebootController("COM0")
+        self.assertFalse(controller.in_boot_guard(None))
+
+    def test_in_boot_guard_within_window(self):
+        """last_action within boot_guard_seconds -> guard active."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        controller = RebootController("COM0")
+        controller.boot_guard_seconds = 90.0
+        self.assertTrue(controller.in_boot_guard(time.time() - 10))
+
+    def test_in_boot_guard_past_window(self):
+        """last_action past boot_guard_seconds -> guard cleared."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        controller = RebootController("COM0")
+        controller.boot_guard_seconds = 90.0
+        self.assertFalse(controller.in_boot_guard(time.time() - 91))
+
+    def test_reboot_decision_skips_probe_during_boot_guard(self):
+        """During boot guard, decide_reboot_action returns wait without probing.
+
+        Critical to keep `echo __READY__` out of u-boot's autoboot window.
+        """
+        from serialwrap_reboot_test.controller import RebootController
+
+        runner = FakeCommandRunner()
+        # Wire READY+OK so the only thing keeping the loop from rebooting is
+        # the guard. If the guard is not honoured we would see normal_reboot.
+        runner.set_response('session list', 0,
+            json.dumps({"sessions": [{"com": "COM0", "state": "READY"}]}))
+        runner.set_response('session self-test', 0,
+            json.dumps({"classification": "OK", "probe_ok": True}))
+
+        controller = RebootController("COM0", runner=runner)
+        controller.boot_guard_seconds = 90.0
+
+        action = controller.decide_reboot_action(time.time() - 30)
+
+        self.assertEqual(action['type'], 'wait')
+        # No UART-touching call should have been issued during the guard.
+        for cmd in runner.commands:
+            joined = ' '.join(cmd)
+            self.assertNotIn('self-test', joined)
+            self.assertNotIn('recover', joined)
 
 
 if __name__ == "__main__":

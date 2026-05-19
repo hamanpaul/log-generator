@@ -12,33 +12,44 @@ from .constants import SERIALWRAP_CMD
 
 def build_fault_injector_script() -> str:
     """Build the target fault injector script content.
-    
+
     Returns a shell script that runs at boot with 10% probability,
     choosing equally among four fault types: thermal notification,
     5G ethernet AN rerun, process coredump, and system crash coredump.
+
+    Random source uses `sha256sum` rather than `od -An -N2 -tu2`: the
+    BGW720 / prplOS BusyBox build ships sha256sum + dd but not `od`,
+    so the previous implementation silently returned 0 from get_random
+    on every call, defeating both the 10% gate and the type selector.
     """
     return '''#!/bin/sh
-# Serialwrap fault injector - runs once at boot
-# Silent execution - redirects to /dev/null except for intentional fault output
+# Serialwrap fault injector - runs once at boot.
+# Silent execution; only intentional fault output reaches /dev/console.
+#
+# Random source: dd 2 bytes from /dev/urandom, sha256sum it, take the
+# first 4 hex chars => 16-bit value. This works on BusyBox builds that
+# lack `od` (e.g. BGW720 prplOS).
 
-# POSIX-compatible random number helper using /dev/urandom
-# Reads 2 bytes as unsigned 16-bit integer (0-65535)
-# Returns 0 if /dev/urandom or od fails
 get_random() {
-    value=$(od -An -N2 -tu2 /dev/urandom 2>/dev/null | tr -d ' ')
+    hex=$(dd if=/dev/urandom bs=2 count=1 2>/dev/null | sha256sum 2>/dev/null | head -c 4)
+    if [ -z "$hex" ]; then
+        echo 0
+        return
+    fi
+    value=$(printf '%d' "0x$hex" 2>/dev/null)
     case "$value" in
         ''|*[!0-9]*) echo 0 ;;
         *) echo "$value" ;;
     esac
 }
 
-# 10% probability gate: trigger fault if random % 10 == 0
+# 10% probability gate
 GATE_RAND=$(get_random)
 if [ $(( $GATE_RAND % 10 )) -ne 0 ]; then
     exit 0
 fi
 
-# Choose fault type: 0-3 for equal 25% probability among four faults
+# Pick fault type 0..3 (equal 25% each)
 FAULT_TYPE_RAND=$(get_random)
 FAULT_TYPE=$(( $FAULT_TYPE_RAND % 4 ))
 
@@ -48,17 +59,15 @@ case $FAULT_TYPE in
         echo "bcm_thermal_drv brcm-therm: Trip 0: threshold=105000 mC hysteresis=2000 mC" > /dev/console
         ;;
     1)
-        # 5G ethernet AN rerun - PHY reset
+        # 5G ethernet AN rerun - PHY reset (BSP prints "Link is Down")
         ethctl eth0 phy-reset > /dev/null 2>&1
         ;;
     2)
-        # Process coredump - collect all PIDs > 4000 and randomly select one
+        # Process coredump - pick a random PID > 4000 and SIGABRT it
         ALL_PIDS=$(ps aux | awk '$2 > 4000 {print $2}')
         if [ -z "$ALL_PIDS" ]; then
-            # No eligible process, exit silently
             exit 0
         fi
-        # Count PIDs and randomly select one
         PID_COUNT=$(echo "$ALL_PIDS" | wc -l)
         PID_RAND=$(get_random)
         RANDOM_LINE=$(( ($PID_RAND % $PID_COUNT) + 1 ))
@@ -66,7 +75,7 @@ case $FAULT_TYPE in
         kill -SIGABRT "$TARGET_PID" > /dev/null 2>&1
         ;;
     3)
-        # System crash coredump - kernel panic via sysrq
+        # System crash - kernel panic via sysrq
         echo c > /proc/sysrq-trigger
         ;;
 esac
@@ -77,27 +86,27 @@ exit 0
 
 def build_init_script() -> str:
     """Build the init script content for /etc/init.d.
-    
-    Returns a shell script that calls the fault injector on start.
+
+    OpenWrt / prplOS use procd; boot dispatches through `/etc/rc.common`
+    via the shebang `#!/bin/sh /etc/rc.common`. Plain SysV-style
+    `case "$1" in start) ...` scripts are NOT executed by the boot
+    sequence even though the `/etc/rc.d/SNN<name>` symlink exists, so
+    the fault injector previously never ran at boot. Use the rc.common
+    pattern (`START=N` + a `start()` function) so procd will invoke us.
     """
-    return '''#!/bin/sh
-# Init script for serialwrap-fault-injector
-# Run at boot via S50 symlink
+    return '''#!/bin/sh /etc/rc.common
+# Serialwrap fault injector init - runs once at boot
+# Dispatched by OpenWrt procd via the S50 symlink in /etc/rc.d.
 
-case "$1" in
-    start)
-        /usr/sbin/serialwrap-fault-injector > /dev/null 2>&1
-        ;;
-    stop|restart|reload)
-        # No-op - injector runs once at boot
-        ;;
-    *)
-        echo "Usage: $0 {start|stop|restart|reload}"
-        exit 1
-        ;;
-esac
+START=50
 
-exit 0
+start() {
+    /usr/sbin/serialwrap-fault-injector > /dev/null 2>&1
+}
+
+stop() {
+    return 0
+}
 '''
 
 

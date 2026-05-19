@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
-from .constants import SERIALWRAP_CMD
+from .constants import SERIALWRAP_CMD, SERIALWRAP_EVENT_HANDLER
 
 
 class ControllerError(Exception):
@@ -21,10 +21,30 @@ class ControllerError(Exception):
 
 
 class CommandRunner:
-    """Run commands and return results."""
-    
+    """Run commands and return results.
+
+    For `serialwrap` invocations, automatically inject `--timeout 30` before
+    the subcommand unless the caller already specified `--timeout`. The CLI
+    default (5 s) is not enough when the daemon is under load — high-volume
+    RX (e.g. eth link bouncing during reboot churn) can keep the RPC queued
+    long enough to miss the 5 s window, causing rc=2 and false-positive
+    "daemon not running" errors on the first call after a quiet period.
+    """
+
+    SERIALWRAP_RPC_TIMEOUT_S = "30"
+
+    def _augment_serialwrap(self, cmd: List[str]) -> List[str]:
+        if not cmd:
+            return cmd
+        if not cmd[0].endswith("/serialwrap") and cmd[0] != "serialwrap":
+            return cmd
+        if "--timeout" in cmd or "--endpoint" in cmd:
+            return cmd
+        return [cmd[0], "--timeout", self.SERIALWRAP_RPC_TIMEOUT_S] + list(cmd[1:])
+
     def run(self, cmd: List[str], **kwargs) -> tuple[int, str, str]:
         """Run a command and return (returncode, stdout, stderr)."""
+        cmd = self._augment_serialwrap(cmd)
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -94,6 +114,14 @@ class RebootController:
         self.last_action_time: Optional[float] = None
         self.sleep_fn = time.sleep  # Injectable for testing
         self.loop_delay = 10  # Configurable loop delay in seconds
+        # Boot guard: after submitting a reboot the target passes through
+        # u-boot, where ANY byte aborts the autoboot countdown and traps us
+        # at the `=>` prompt. Suppress every UART-sending probe (self-test /
+        # session recover / raw reset / raw reboot) for this many seconds
+        # after the last action so probes never land in the u-boot window.
+        # 90 s covers BGW720/prplOS bootmsg's ~46 s of "Delay complete(23 secs)"
+        # plus u-boot + kernel + init headroom.
+        self.boot_guard_seconds = 90.0
         
     def check_serialwrap_event_support(self) -> bool:
         """Check if serialwrap supports event subcommand."""
@@ -136,41 +164,51 @@ class RebootController:
     def find_active_minicom_log(
         self,
         marker: str,
-        max_age_seconds: int = 600
+        max_age_seconds: int = 600,
+        max_wait_seconds: float = 15.0,
+        poll_interval_seconds: float = 0.5,
     ) -> Optional[Path]:
         """Find active minicom log containing marker.
-        
+
+        Polls because `serialwrap cmd submit --mode line` is async — the marker
+        echo can take up to a few seconds to be transmitted to the target,
+        echoed back, and captured by minicom into the log file.
+
         Args:
             marker: Marker string to search for.
             max_age_seconds: Maximum age for log file in seconds.
-            
+            max_wait_seconds: Maximum total time to wait for marker echo to land.
+            poll_interval_seconds: Interval between rescans while waiting.
+
         Returns:
-            Path to active log or None if not found.
+            Path to active log or None if not found within max_wait_seconds.
         """
         pattern = f"mini_{self.selector}_*.log"
-        current_time = time.time()
-        
-        for log_file in self.log_dir.glob(pattern):
-            # Check file age
-            try:
-                mtime = log_file.stat().st_mtime
-                if current_time - mtime > max_age_seconds:
+        deadline = time.time() + max_wait_seconds
+
+        while True:
+            current_time = time.time()
+            for log_file in self.log_dir.glob(pattern):
+                try:
+                    mtime = log_file.stat().st_mtime
+                    if current_time - mtime > max_age_seconds:
+                        continue
+                except OSError as e:
+                    print(f"WARNING: Cannot stat {log_file}: {e}", file=sys.stderr)
                     continue
-            except OSError as e:
-                print(f"WARNING: Cannot stat {log_file}: {e}", file=sys.stderr)
-                continue
-            
-            # Check for marker using streaming read
-            try:
-                with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    for line in f:
-                        if marker in line:
-                            return log_file
-            except OSError as e:
-                print(f"WARNING: Cannot read {log_file}: {e}", file=sys.stderr)
-                continue
-        
-        return None
+
+                try:
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        for line in f:
+                            if marker in line:
+                                return log_file
+                except OSError as e:
+                    print(f"WARNING: Cannot read {log_file}: {e}", file=sys.stderr)
+                    continue
+
+            if time.time() >= deadline:
+                return None
+            time.sleep(poll_interval_seconds)
     
     def derive_report_path(self, minicom_log: Path) -> Path:
         """Derive report path from minicom log name.
@@ -245,7 +283,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "brcm-therm"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -255,8 +293,13 @@ class RebootController:
                 "rule_id": f"{owner}.link-down",
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
+                # Intentionally specific: `Link is Down` is the BSP marker
+                # printed by `ethctl eth0 phy-reset` (fault injector type 1),
+                # not the generic `Link Down` eth0 flap noise that the BSP
+                # also emits. Keep this exact substring to count only
+                # injected faults.
                 "pattern": {"kind": "contains", "value": "Link is Down"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -267,7 +310,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "pstate"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -278,7 +321,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "Kernel panic"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             },
             {
@@ -289,7 +332,7 @@ class RebootController:
                 "kind": "tool",
                 "selectors": ["COM0", "COM1"],
                 "pattern": {"kind": "contains", "value": "SMC bootloader"},
-                "handler": {"exec": ["serialwrap-event-handler"]},
+                "handler": {"exec": [SERIALWRAP_EVENT_HANDLER]},
                 "auto_enable_com_on_load": False
             }
         ]
@@ -297,20 +340,36 @@ class RebootController:
     
     def register_event_rules(self) -> None:
         """Register event rules with serialwrap.
-        
+
+        Current serialwrap CLI accepts rules via `event add --file <path>`
+        rather than the legacy `--rule <json>` form.
+
         Raises:
             ControllerError: If rule registration fails.
         """
+        import tempfile
         rules = self.generate_event_rules()
         for rule in rules:
-            rule_json = json.dumps(rule)
-            returncode, stdout, stderr = self.runner.run([
-                SERIALWRAP_CMD, "event", "add",
-                "--rule", rule_json
-            ])
-            
-            if returncode != 0:
-                raise ControllerError(f"Failed to add event rule {rule['name']}: {stderr}")
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", prefix=f"rule_{rule['name']}_",
+                delete=False, encoding="utf-8"
+            ) as tf:
+                json.dump(rule, tf)
+                tmp_path = tf.name
+            try:
+                returncode, stdout, stderr = self.runner.run([
+                    SERIALWRAP_CMD, "event", "add",
+                    "--file", tmp_path
+                ])
+                if returncode != 0:
+                    raise ControllerError(
+                        f"Failed to add event rule {rule['name']}: {stderr}"
+                    )
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
     
     def enable_selector(self) -> None:
         """Enable event matcher for this selector.
@@ -374,20 +433,28 @@ class RebootController:
             if not isinstance(status, dict):
                 print("WARNING: Unexpected event status format: top-level JSON is not an object", file=sys.stderr)
                 return None
-            
-            selectors = status.get("selectors", {})
-            if not isinstance(selectors, dict):
-                print("WARNING: Unexpected event status format: selectors is not an object", file=sys.stderr)
-                return None
-            
-            for selector, info in selectors.items():
-                if not isinstance(info, dict):
-                    print(f"WARNING: Unexpected event status format for {selector}", file=sys.stderr)
-                    return None
-                if selector != self.selector and info.get("enabled"):
-                    return True
-            
-            return False
+
+            # Current schema: {"coms": ["COM0", ...]} listing enabled COMs.
+            coms = status.get("coms")
+            if isinstance(coms, list):
+                for com in coms:
+                    if com != self.selector:
+                        return True
+                return False
+
+            # Legacy schema fallback: {"selectors": {"COMx": {"enabled": bool}}}.
+            selectors = status.get("selectors")
+            if isinstance(selectors, dict):
+                for selector, info in selectors.items():
+                    if not isinstance(info, dict):
+                        print(f"WARNING: Unexpected event status format for {selector}", file=sys.stderr)
+                        return None
+                    if selector != self.selector and info.get("enabled"):
+                        return True
+                return False
+
+            print("WARNING: event status missing both 'coms' and 'selectors' fields", file=sys.stderr)
+            return None
         except json.JSONDecodeError as e:
             print(f"WARNING: Failed to parse event status JSON: {e}", file=sys.stderr)
             return None
@@ -397,7 +464,10 @@ class RebootController:
     
     def remove_event_rules(self) -> None:
         """Remove shared event rules.
-        
+
+        Current serialwrap CLI accepts `event rm <rule_id>` (positional) rather
+        than the legacy `--name <name>` form.
+
         Raises:
             ControllerError: If rule removal fails.
         """
@@ -405,9 +475,9 @@ class RebootController:
         for rule in rules:
             returncode, stdout, stderr = self.runner.run([
                 SERIALWRAP_CMD, "event", "rm",
-                "--name", rule["name"]
+                rule["rule_id"]
             ])
-            
+
             if returncode != 0:
                 raise ControllerError(f"Failed to remove event rule {rule['name']}: {stderr}")
     
@@ -424,7 +494,7 @@ class RebootController:
             data = json.loads(stdout)
             sessions = data.get("sessions", [])
             for session in sessions:
-                if session.get("selector") == self.selector:
+                if session.get("com") == self.selector or session.get("selector") == self.selector:
                     return session.get("state") == "READY"
             return False
         except json.JSONDecodeError as e:
@@ -548,44 +618,70 @@ class RebootController:
             return False
     
     def send_raw_broker_command(self, command: str) -> float:
-        """Send raw broker command.
-        
+        """Send raw command directly to the session via `cmd submit`.
+
+        The legacy `serialwrap broker raw` subcommand was removed from the
+        current CLI; recovery paths now route raw input through `cmd submit`
+        with source `agent:reboot-controller-raw`, which still hands the bytes
+        plus a trailing newline to the UART even when the target is sitting at
+        a non-shell prompt (e.g. u-boot `=>`).
+
         Args:
             command: Command string to send.
-            
+
         Returns:
             Timestamp of command submission.
-            
+
         Raises:
-            ControllerError: If broker command fails.
+            ControllerError: If submit fails.
         """
         returncode, stdout, stderr = self.runner.run([
-            SERIALWRAP_CMD, "broker", "raw",
+            SERIALWRAP_CMD, "cmd", "submit",
             "--selector", self.selector,
-            "--input", command
+            "--source", "agent:reboot-controller-raw",
+            "--mode", "line",
+            "--cmd", command
         ])
-        
+
         if returncode != 0:
-            raise ControllerError(f"Failed to send raw broker command '{command}' to {self.selector}: {stderr}")
-        
+            raise ControllerError(f"Failed to send raw command '{command}' to {self.selector}: {stderr}")
+
         return time.time()
     
+    def in_boot_guard(self, last_action: Optional[float]) -> bool:
+        """Return True if we are still in the post-reboot boot-guard window.
+
+        While the target is booting through u-boot, any byte we send aborts
+        the autoboot countdown and strands us at the `=>` prompt. The guard
+        keeps the controller silent on the UART until u-boot has handed off
+        to the kernel.
+        """
+        if last_action is None:
+            return False
+        return (time.time() - last_action) < self.boot_guard_seconds
+
     def decide_reboot_action(
         self,
         last_action: Optional[float]
     ) -> Dict[str, Any]:
         """Decide next reboot action.
-        
+
         Args:
             last_action: Timestamp of last reboot or fallback action.
-            
+
         Returns:
             Dictionary with action type and details.
         """
+        # Boot guard: during the boot window, neither probe (self-test /
+        # session recover) nor raw key injection is safe — sending any byte
+        # while the target is in u-boot autoboot traps it at `=>`.
+        if self.in_boot_guard(last_action):
+            return {"type": "wait"}
+
         # Check if READY and self-test OK
         if self.check_ready_state() and self.check_self_test():
             return {"type": "normal_reboot"}
-        
+
         # Not READY - check throttle
         if self.should_throttle_recovery(last_action):
             return {"type": "wait"}

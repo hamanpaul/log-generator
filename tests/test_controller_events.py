@@ -62,7 +62,15 @@ class TestControllerEventRules(unittest.TestCase):
         for rule in rules:
             self.assertIn('COM0', rule['selectors'])
             self.assertIn('COM1', rule['selectors'])
-            self.assertEqual(rule['handler'], {"exec": ["serialwrap-event-handler"]})
+            # Handler must be a single-element exec list pointing at the
+            # `serialwrap-event-handler` wrapper. The exact path is asserted
+            # in test_rule_handler_uses_absolute_path / env override.
+            self.assertEqual(set(rule['handler']), {"exec"})
+            self.assertEqual(len(rule['handler']['exec']), 1)
+            self.assertTrue(
+                rule['handler']['exec'][0].endswith('serialwrap-event-handler'),
+                f"unexpected handler path: {rule['handler']['exec'][0]}"
+            )
 
     def test_event_rules_use_current_serialwrap_schema(self):
         """Generated rules match the current serialwrap EventEngine schema."""
@@ -79,7 +87,12 @@ class TestControllerEventRules(unittest.TestCase):
         self.assertEqual(brcm_rule["rule_id"], "agent-reboot-controller.brcm-therm")
         self.assertEqual(brcm_rule["kind"], "tool")
         self.assertEqual(brcm_rule["pattern"], {"kind": "contains", "value": "brcm-therm"})
-        self.assertEqual(brcm_rule["handler"], {"exec": ["serialwrap-event-handler"]})
+        # Handler resolved to repo's bin/serialwrap-event-handler at runtime;
+        # exact path is asserted elsewhere.
+        self.assertEqual(set(brcm_rule["handler"]), {"exec"})
+        self.assertTrue(
+            brcm_rule["handler"]["exec"][0].endswith("serialwrap-event-handler")
+        )
         self.assertFalse(brcm_rule["auto_enable_com_on_load"])
     
     def test_brcm_therm_rule_match(self):
@@ -95,15 +108,21 @@ class TestControllerEventRules(unittest.TestCase):
         self.assertEqual(brcm_rule['pattern']['value'], 'brcm-therm')
     
     def test_link_down_rule_match(self):
-        """Test link-down rule has correct match pattern."""
+        """Test link-down rule has correct match pattern.
+
+        Intentionally `Link is Down` (not bare `Link Down`): the longer
+        substring is the BSP marker printed by `ethctl eth0 phy-reset`
+        (fault injector type 1), distinguishing injected faults from the
+        background eth0 flap noise.
+        """
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
         controller = RebootController("COM1", runner=runner)
-        
+
         rules = controller.generate_event_rules()
         link_rule = next(r for r in rules if r['name'] == 'link-down')
-        
+
         self.assertEqual(link_rule['pattern']['value'], 'Link is Down')
     
     def test_pstate_rule_match_case_sensitive(self):
@@ -140,9 +159,62 @@ class TestControllerEventRules(unittest.TestCase):
         
         rules = controller.generate_event_rules()
         smc_rule = next(r for r in rules if r['name'] == 'smc-bootloader')
-        
+
         self.assertEqual(smc_rule['pattern']['value'], 'SMC bootloader')
-    
+
+    def test_rule_handler_uses_absolute_path(self):
+        """Every rule.handler.exec[0] must be an absolute path.
+
+        serialwrap daemon launches the handler via subprocess.Popen without
+        a shell; a bare name would only work if it sat on the daemon's PATH.
+        """
+        import os
+        from serialwrap_reboot_test.controller import RebootController
+
+        controller = RebootController("COM0")
+        rules = controller.generate_event_rules()
+        self.assertEqual(len(rules), 5)
+        for r in rules:
+            exec_argv = r['handler']['exec']
+            self.assertIsInstance(exec_argv, list)
+            self.assertTrue(len(exec_argv) >= 1)
+            self.assertTrue(
+                os.path.isabs(exec_argv[0]),
+                f"{r['name']} handler exec not absolute: {exec_argv[0]}",
+            )
+            self.assertTrue(
+                exec_argv[0].endswith('/bin/serialwrap-event-handler'),
+                f"{r['name']} handler exec wrong filename: {exec_argv[0]}",
+            )
+
+    def test_rule_handler_env_override(self):
+        """`SERIALWRAP_EVENT_HANDLER` env var overrides the derived path.
+
+        Lets operators run out-of-tree without editing the constants.
+        """
+        import importlib
+        import os
+        from serialwrap_reboot_test import constants
+        from serialwrap_reboot_test import controller as ctrl_mod
+
+        sentinel = "/opt/custom-bin/event-handler"
+        original = os.environ.get('SERIALWRAP_EVENT_HANDLER')
+        os.environ['SERIALWRAP_EVENT_HANDLER'] = sentinel
+        try:
+            importlib.reload(constants)
+            importlib.reload(ctrl_mod)
+            controller = ctrl_mod.RebootController("COM0")
+            rules = controller.generate_event_rules()
+            for r in rules:
+                self.assertEqual(r['handler']['exec'], [sentinel])
+        finally:
+            if original is None:
+                os.environ.pop('SERIALWRAP_EVENT_HANDLER', None)
+            else:
+                os.environ['SERIALWRAP_EVENT_HANDLER'] = original
+            importlib.reload(constants)
+            importlib.reload(ctrl_mod)
+
     def test_register_event_rules(self):
         """Test registering event rules with serialwrap."""
         from serialwrap_reboot_test.controller import RebootController
@@ -234,9 +306,9 @@ class TestControllerEventRules(unittest.TestCase):
     def test_check_other_selectors_none_enabled(self):
         """Test checking when no other COM selectors are enabled."""
         from serialwrap_reboot_test.controller import RebootController
-        
+
         runner = FakeCommandRunner()
-        
+
         # Simulate all disabled
         status_output = json.dumps({
             "selectors": {
@@ -245,12 +317,30 @@ class TestControllerEventRules(unittest.TestCase):
             }
         })
         runner.set_response('event status', 0, status_output)
-        
+
         controller = RebootController("COM1", runner=runner)
         result = controller.check_other_selectors_enabled()
-        
+
         # No other selectors enabled, so should return False
         self.assertFalse(result)
+
+    def test_check_other_selectors_current_schema_enabled(self):
+        """Current serialwrap reports enabled COMs in a top-level `coms` list."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        runner = FakeCommandRunner()
+        runner.set_response('event status', 0, json.dumps({"coms": ["COM0", "COM1"]}))
+        controller = RebootController("COM0", runner=runner)
+        self.assertTrue(controller.check_other_selectors_enabled())
+
+    def test_check_other_selectors_current_schema_alone(self):
+        """Only this selector enabled in the `coms` list -> False."""
+        from serialwrap_reboot_test.controller import RebootController
+
+        runner = FakeCommandRunner()
+        runner.set_response('event status', 0, json.dumps({"coms": ["COM0"]}))
+        controller = RebootController("COM0", runner=runner)
+        self.assertFalse(controller.check_other_selectors_enabled())
     
     def test_remove_event_rules(self):
         """Test removing shared event rules."""
