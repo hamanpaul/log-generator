@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 
 Format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
-and hamanpaul project policy v1.0.0.
+and hamanpaul project policy v1.0.1.
 
 ## [Unreleased]
 
@@ -12,6 +12,7 @@ and hamanpaul project policy v1.0.0.
   toolkit and paulsha-conventions policy skeleton.
 
 ### Changed
+- **Sync policy 1.0.1**: bump `policy_version` 1.0.0 → 1.0.1 (`.paul-project.yml` + four agent convention files + `managed-by@v1.0.1`); repin the `policy-check` caller workflow `uses:` and `policy_engine_ref` to `hamanpaul/paulsha-conventions@4ff59b6c35a46a87af3c3e641975743ee8fa0858` (includes R-17 / R-18); document R-17 / R-18 and the language guideline in the agent files.
 - Update serialwrap reboot-test event rules and handler payload parsing for the
   current serialwrap EventEngine schema while preserving legacy payload support.
 - Align the policy check workflow with the branch protection required

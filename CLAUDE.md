@@ -1,15 +1,15 @@
-<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.0 -->
+<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.1 -->
 <!-- If this file changes, keep CLAUDE.md / AGENTS.md / GEMINI.md / .github/copilot-instructions.md synchronized. -->
-policy_version: 1.0.0
+policy_version: 1.0.1
 
 # Agent Policy Checklist
 
-This repository is governed by hamanpaul project policy v1.0.0.
+This repository is governed by hamanpaul project policy v1.0.1.
 All agents entering a session must follow this checklist.
 
 ## Repository Profile
 - policy_profile: `flat` (see `.paul-project.yml`)
-- policy_version: `1.0.0`
+- policy_version: `1.0.1`
 
 ## Before Work
 - [ ] Confirm the current branch is not `main`.
@@ -55,3 +55,12 @@ All agents entering a session must follow this checklist.
 - `policy-exempt:cli-help`
 - `skip-changelog`
 - `wip`
+
+## v1.0.1 new rules (issue linking / docs sync / language)
+> Added in policy 1.0.1 together with R-17 / R-18 and the language guideline.
+
+- **R-17 (PR↔issue, FAIL gate)**: when a PR body references an issue (`#N`) it must use a closing keyword (`Closes` / `Fixes` / `Resolves #N`) so the merge auto-closes the issue and records a cross-reference; for reference-only PRs apply `policy-exempt:issue-link`.
+- **R-18 (docs sync, WARN, non-blocking)**: warns when `code_paths` change without a `README.md` / `docs/**` update; internal-only changes may apply `policy-exempt:docs-sync`.
+- **Language guideline (checklist)**: choose language by repo owner — `github.com/hamanpaul/*` and `github.com/paulc-arc/*` → zh-tw; arcadyan GitLab → en_US. Applies to PR title/body and all comments.
+- **Before starting (soft, non-blocking)**: if the task maps to an issue, verify relevance via `gh issue view <N>`, optionally name the branch `feature/<N>-<slug>`, and put `Closes #N` in the PR body; if no issue applies, proceed as usual.
+- **Exemption whitelist additions**: `policy-exempt:issue-link` (R-17), `policy-exempt:docs-sync` (R-18).
